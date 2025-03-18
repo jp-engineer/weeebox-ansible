@@ -1,0 +1,10 @@
+Assumes:
+
+- ansible user already exits and has paswordless sudo enabled
+
+
+
+Steps
+
+- playbooks/update-packages
+- playbooks/setup-monitoring

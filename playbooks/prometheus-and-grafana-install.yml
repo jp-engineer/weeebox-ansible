@@ -1,0 +1,192 @@
+---
+- name: Setup Node Exporter on all Raspberry Pis except pi-runt
+  hosts: all:!pi-runt  # Exclude pi-runt
+  become: true
+  tasks:
+    - name: Install Node Exporter dependencies
+      apt:
+        name:
+          - curl
+          - tar
+        state: present
+        update_cache: yes
+
+    - name: Download Node Exporter (ARMv7)
+      shell: |
+        NODE_EXPORTER_VERSION="1.7.0"
+        cd /tmp
+        curl -LO https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-armv7.tar.gz
+        tar -xzf node_exporter-${NODE_EXPORTER_VERSION}.linux-armv7.tar.gz
+        mv node_exporter-${NODE_EXPORTER_VERSION}.linux-armv7/node_exporter /usr/local/bin/
+      args:
+        creates: /usr/local/bin/node_exporter
+
+    - name: Create Node Exporter service
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network.target
+
+          [Service]
+          User=nobody
+          ExecStart=/usr/local/bin/node_exporter
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Node Exporter
+      systemd:
+        name: node_exporter
+        enabled: yes
+        state: started
+
+- name: Setup Node Exporter on pi-runt (ARMv6)
+  hosts: pi-runt
+  become: true
+  tasks:
+    - name: Install dependencies
+      apt:
+        name:
+          - curl
+          - tar
+        state: present
+        update_cache: yes
+
+    - name: Download Node Exporter (ARMv6)
+      shell: |
+        NODE_EXPORTER_VERSION="1.7.0"
+        cd /tmp
+        curl -LO https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-armv6.tar.gz
+        tar -xzf node_exporter-${NODE_EXPORTER_VERSION}.linux-armv6.tar.gz
+        mv node_exporter-${NODE_EXPORTER_VERSION}.linux-armv6/node_exporter /usr/local/bin/
+      args:
+        creates: /usr/local/bin/node_exporter
+
+    - name: Create Node Exporter service
+      copy:
+        dest: /etc/systemd/system/node_exporter.service
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network.target
+
+          [Service]
+          User=nobody
+          ExecStart=/usr/local/bin/node_exporter
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Node Exporter
+      systemd:
+        name: node_exporter
+        enabled: yes
+        state: started
+
+- name: Install Prometheus and Grafana on pi-monitor
+  hosts: monitoring
+  become: true
+  vars_files:
+    - /home/jack/ansible-secrets/grafana_password.yml  # Ensure absolute path
+  tasks:
+    - name: Install dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - software-properties-common
+          - adduser
+          - libfontconfig1
+          - wget
+        state: present
+        update_cache: yes
+
+    - name: Create Prometheus user
+      user:
+        name: prometheus
+        shell: /usr/sbin/nologin
+        system: yes
+        create_home: no
+
+    - name: Download Prometheus
+      shell: |
+        PROM_VERSION="2.47.2"
+        cd /tmp
+        curl -LO https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-armv7.tar.gz
+        tar -xzf prometheus-${PROM_VERSION}.linux-armv7.tar.gz
+        mv prometheus-${PROM_VERSION}.linux-armv7/prometheus /usr/local/bin/
+        mv prometheus-${PROM_VERSION}.linux-armv7/promtool /usr/local/bin/
+      args:
+        creates: /usr/local/bin/prometheus
+
+    - name: Create Prometheus config directory
+      file:
+        path: /etc/prometheus
+        state: directory
+        owner: prometheus
+        group: prometheus
+        mode: 0755
+
+    - name: Configure Prometheus
+      copy:
+        dest: /etc/prometheus/prometheus.yml
+        content: |
+          global:
+            scrape_interval: 15s
+
+          scrape_configs:
+            - job_name: 'node_exporter'
+              static_configs:
+                - targets:
+                    - pi-nas:9100
+                    - pi-hole:9100
+                    - pi-runt:9100
+                    - pi-tor:9100
+                    - pi-k-master:9100
+                    - pi-k-worker-1:9100
+                    - pi-k-worker-2:9100
+
+    - name: Create Prometheus systemd service
+      copy:
+        dest: /etc/systemd/system/prometheus.service
+        content: |
+          [Unit]
+          Description=Prometheus
+          After=network.target
+
+          [Service]
+          User=prometheus
+          ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml
+          Restart=always
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Prometheus
+      systemd:
+        name: prometheus
+        enabled: yes
+        state: started
+
+    - name: Install Grafana
+      shell: |
+        wget -q -O - https://packages.grafana.com/gpg.key | apt-key add -
+        add-apt-repository "deb https://packages.grafana.com/oss/deb stable main"
+        apt update && apt install -y grafana
+      args:
+        creates: /usr/sbin/grafana-server
+
+    - name: Configure Grafana admin password
+      lineinfile:
+        path: /etc/default/grafana-server
+        line: "GF_SECURITY_ADMIN_PASSWORD={{ grafana_admin_password }}"
+        create: yes
+        state: present
+
+    - name: Restart Grafana to apply password change
+      systemd:
+        name: grafana-server
+        state: restarted
