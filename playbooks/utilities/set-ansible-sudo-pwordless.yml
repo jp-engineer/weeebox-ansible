@@ -1,0 +1,9 @@
+- name: Set up passwordless sudo for ansible user
+  hosts: pis
+  become: true
+  tasks:
+    - name: Add ansible user to sudoers file
+      copy:
+        dest: /etc/sudoers.d/ansible
+        content: "ansible ALL=(ALL) NOPASSWD:ALL"
+        mode: 0440

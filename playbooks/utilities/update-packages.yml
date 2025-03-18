@@ -1,0 +1,15 @@
+---
+- name: Update all installed packages on Raspberry Pis
+  hosts: pis
+  become: true
+  tasks:
+
+    - name: Update package lists
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Upgrade all installed packages
+      ansible.builtin.apt:
+        upgrade: full
+        autoremove: yes
+        autoclean: yes

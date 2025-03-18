@@ -1,0 +1,88 @@
+---
+- name: Setup Node Exporter on all Raspberry Pis except pi-runt
+  hosts: pis:!pi-runt  # Exclude pi-runt 
+  become: true
+  tasks:
+    - name: Install Node Exporter dependencies
+      apt:
+        name:
+          - curl
+          - tar
+        state: present
+        update_cache: yes
+
+    - name: Get the latest Node Exporter release version
+      uri:
+        url: https://api.github.com/repos/prometheus/node_exporter/releases/latest
+        method: GET
+        return_content: yes
+      register: github_release_armv7
+
+    - name: Extract version tag from JSON response
+      set_fact:
+        node_exporter_version: "{{ github_release_armv7.json.tag_name | regex_replace('^v', '') }}"
+
+    - name: Check if Node Exporter is already installed
+      command: "/usr/local/bin/node_exporter --version"
+      register: installed_version_output
+      ignore_errors: yes  # Ignore if node_exporter is not installed
+      changed_when: false
+
+    - name: Extract installed version (if available)
+      set_fact:
+        installed_version: "{{ installed_version_output.stdout_lines[0] | regex_search('node_exporter, version ([^ ]+)', '\\1') | first }}"
+      when: installed_version_output.stdout_lines is defined
+      ignore_errors: yes
+
+    - name: Compare installed version with latest
+      set_fact:
+        needs_update: "{{ installed_version is not defined or installed_version != node_exporter_version }}"
+
+    - name: Download and install Node Exporter if outdated or missing
+      shell: |
+        cd /tmp
+        curl -LO https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-armv7.tar.gz
+        tar -xzf node_exporter-{{ node_exporter_version }}.linux-armv7.tar.gz
+        mv node_exporter-{{ node_exporter_version }}.linux-armv7/node_exporter /usr/local/bin/
+      args:
+        creates: /usr/local/bin/node_exporter
+      when: needs_update
+
+    - name: Check if `node_exporter.service` is already correct
+      stat:
+        path: /etc/systemd/system/node_exporter.service
+      register: service_file
+
+    - name: Get checksum of existing `node_exporter.service`
+      command: sha256sum /etc/systemd/system/node_exporter.service
+      register: existing_checksum
+      changed_when: false
+      when: service_file.stat.exists
+
+    - name: Get checksum of reference `node_exporter.service`
+      command: sha256sum playbooks/monitoring/files/node_exporter.service
+      delegate_to: localhost
+      register: reference_checksum
+      changed_when: false
+
+    - name: Copy `node_exporter.service` only if different
+      copy:
+        src: playbooks/monitoring/files/node_exporter.service
+        dest: /etc/systemd/system/node_exporter.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Node Exporter
+      when: not service_file.stat.exists or existing_checksum.stdout.split()[0] != reference_checksum.stdout.split()[0]
+
+    - name: Enable and start Node Exporter
+      systemd:
+        name: node_exporter
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart Node Exporter
+      systemd:
+        name: node_exporter
+        state: restarted
