@@ -1,0 +1,27 @@
+---
+- name: Disable WiFi on all Raspberry Pis
+  hosts: pis
+  become: true
+  tasks:
+    - name: Ensure WiFi is disabled in /boot/config.txt
+      lineinfile:
+        path: /boot/config.txt
+        line: "dtoverlay=disable-wifi"
+        state: present
+      register: config_wifi
+
+    - name: Disable WiFi interface (wlan0)
+      command: rfkill block wifi
+      changed_when: false
+
+    - name: Ensure WiFi interface is disabled on boot
+      copy:
+        dest: /etc/modprobe.d/raspi-blacklist.conf
+        content: |
+          blacklist brcmfmac
+          blacklist brcmutil
+      mode: '0644'
+
+    - name: Apply changes (Reboot required if config.txt changed)
+      reboot:
+      when: config_wifi.changed

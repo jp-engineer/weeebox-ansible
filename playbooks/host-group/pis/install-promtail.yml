@@ -1,0 +1,84 @@
+---
+- name: Install Promtail on all Raspberry Pis
+  hosts: pis
+  become: true
+  tasks:
+    - name: Install dependencies
+      apt:
+        name:
+          - curl
+          - unzip
+        state: present
+        update_cache: yes
+
+    - name: Get the latest Promtail release version
+      uri:
+        url: https://api.github.com/repos/grafana/loki/releases/latest
+        method: GET
+        return_content: yes
+      register: github_release
+
+    - name: Extract version tag from JSON response
+      set_fact:
+        promtail_version: "{{ github_release.json.tag_name | regex_replace('^v', '') }}"
+
+    - name: Determine correct architecture for Promtail
+      set_fact:
+        promtail_arch: "{% if 'pi-runt' in inventory_hostname %}armv6{% else %}armv7{% endif %}"
+
+    - name: Check if Promtail is already installed
+      command: "/usr/local/bin/promtail --version"
+      register: installed_version_output
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Extract installed version (if available)
+      set_fact:
+        installed_version: "{{ installed_version_output.stdout_lines[0] | regex_search('promtail, version ([^ ]+)', '\\1') | first }}"
+      when: installed_version_output.stdout_lines is defined
+      ignore_errors: yes
+
+    - name: Compare installed version with latest
+      set_fact:
+        needs_update: "{{ installed_version is not defined or installed_version != promtail_version }}"
+
+    - name: Download and install Promtail if outdated or missing
+      shell: |
+        cd /tmp
+        curl -LO https://github.com/grafana/loki/releases/download/v{{ promtail_version }}/promtail-linux-{{ promtail_arch }}.zip
+        unzip promtail-linux-{{ promtail_arch }}.zip
+        mv promtail-linux-{{ promtail_arch }} /usr/local/bin/promtail
+        chmod +x /usr/local/bin/promtail
+      args:
+        creates: /usr/local/bin/promtail
+      when: needs_update
+
+    - name: Deploy `promtail-config.yml` only if different
+      copy:
+        src: files/promtail-config.yml
+        dest: /etc/promtail/promtail-config.yml
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Promtail
+
+    - name: Deploy `promtail.service` only if different
+      copy:
+        src: files/promtail.service
+        dest: /etc/systemd/system/promtail.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Promtail
+
+    - name: Enable and start Promtail
+      systemd:
+        name: promtail
+        enabled: yes
+        state: started
+
+  handlers:
+    - name: Restart Promtail
+      systemd:
+        name: promtail
+        state: restarted

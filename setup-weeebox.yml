@@ -1,3 +1,7 @@
 ---
   - import_playbook: playbooks/utilities/set-ansible-sudo-pwordless.yml
   - import_playbook: playbooks/utilities/update-packages.yml
+  - import_playbook: playbooks/utilities/disable-wifi.yml
+
+  - import_playbook: playbooks/host-group/pis/install-node-exporter.yml
+  - import_playbook: playbooks/host-group/pis/install-promtail.yml

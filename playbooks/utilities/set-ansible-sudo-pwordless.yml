@@ -1,3 +1,4 @@
+---
 - name: Set up passwordless sudo for ansible user
   hosts: pis
   become: true

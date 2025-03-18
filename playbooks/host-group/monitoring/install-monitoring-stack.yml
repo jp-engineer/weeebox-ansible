@@ -1,0 +1,184 @@
+---
+- name: Install and Configure Monitoring Stack (Prometheus, Loki, Grafana)
+  hosts: pi-monitor
+  become: true
+  vars_files:
+    - ~/ansible-secrets/grafana_password.yml  # Load encrypted password
+
+  tasks:
+    - name: Install dependencies
+      apt:
+        name:
+          - curl
+          - unzip
+          - software-properties-common
+          - apt-transport-https
+        state: present
+        update_cache: yes
+
+    - name: Get the latest versions of Prometheus, Loki, and Grafana
+      uri:
+        url: "https://api.github.com/repos/{{ item }}/releases/latest"
+        method: GET
+        return_content: yes
+      loop:
+        - prometheus/prometheus
+        - grafana/loki
+        - grafana/grafana
+      register: github_releases
+
+    - name: Extract latest versions
+      set_fact:
+        prometheus_version: "{{ github_releases.results[0].json.tag_name | regex_replace('^v', '') }}"
+        loki_version: "{{ github_releases.results[1].json.tag_name | regex_replace('^v', '') }}"
+        grafana_version: "{{ github_releases.results[2].json.tag_name | regex_replace('^v', '') }}"
+
+# ==========================
+# Install Prometheus (Only if Needed)
+# ==========================
+    - name: Check installed Prometheus version
+      command: "/usr/local/bin/prometheus --version"
+      register: installed_prometheus_version
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Extract installed Prometheus version
+      set_fact:
+        installed_prometheus: "{{ installed_prometheus_version.stdout_lines[0] | regex_search('version ([^ ]+)', '\\1') | first }}"
+      when: installed_prometheus_version.stdout_lines is defined
+      ignore_errors: yes
+
+    - name: Determine if Prometheus update is needed
+      set_fact:
+        prometheus_update_needed: "{{ installed_prometheus is not defined or installed_prometheus != prometheus_version }}"
+
+    - name: Download and install Prometheus if outdated or missing
+      shell: |
+        cd /tmp
+        curl -LO https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-arm64.tar.gz
+        tar -xzf prometheus-{{ prometheus_version }}.linux-arm64.tar.gz
+        mv prometheus-{{ prometheus_version }}.linux-arm64/prometheus /usr/local/bin/
+        mv prometheus-{{ prometheus_version }}.linux-arm64/promtool /usr/local/bin/
+        mkdir -p /etc/prometheus /var/lib/prometheus
+      args:
+        creates: /usr/local/bin/prometheus
+      when: prometheus_update_needed
+
+    - name: Deploy Prometheus configuration if changed
+      copy:
+        src: files/prometheus.yml
+        dest: /etc/prometheus/prometheus.yml
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Prometheus
+
+    - name: Deploy Prometheus systemd service if changed
+      copy:
+        src: files/prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Prometheus
+
+    - name: Enable and start Prometheus
+      systemd:
+        name: prometheus
+        enabled: yes
+        state: started
+
+# ==========================
+# Install Loki (Only if Needed)
+# ==========================
+    - name: Check installed Loki version
+      command: "/usr/local/bin/loki --version"
+      register: installed_loki_version
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Extract installed Loki version
+      set_fact:
+        installed_loki: "{{ installed_loki_version.stdout_lines[0] | regex_search('version ([^ ]+)', '\\1') | first }}"
+      when: installed_loki_version.stdout_lines is defined
+      ignore_errors: yes
+
+    - name: Determine if Loki update is needed
+      set_fact:
+        loki_update_needed: "{{ installed_loki is not defined or installed_loki != loki_version }}"
+
+    - name: Download and install Loki if outdated or missing
+      shell: |
+        cd /tmp
+        curl -LO https://github.com/grafana/loki/releases/download/v{{ loki_version }}/loki-linux-arm64.zip
+        unzip loki-linux-arm64.zip
+        mv loki-linux-arm64 /usr/local/bin/loki
+        chmod +x /usr/local/bin/loki
+      args:
+        creates: /usr/local/bin/loki
+      when: loki_update_needed
+
+    - name: Deploy Loki configuration if changed
+      copy:
+        src: files/loki-config.yml
+        dest: /etc/loki/loki-config.yml
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Loki
+
+    - name: Deploy Loki systemd service if changed
+      copy:
+        src: files/loki.service
+        dest: /etc/systemd/system/loki.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Loki
+
+    - name: Enable and start Loki
+      systemd:
+        name: loki
+        enabled: yes
+        state: started
+
+# ==========================
+# Install & Configure Grafana (only if needed)
+# ==========================
+    - name: Install Grafana (Only if Needed)
+      apt:
+        name: grafana
+        state: latest
+
+    - name: Set Grafana admin password in environment variables
+      lineinfile:
+        path: /etc/default/grafana-server
+        line: "GF_SECURITY_ADMIN_PASSWORD={{ grafana_admin_password }}"
+        create: yes
+        state: present
+
+    - name: Reload systemd to apply Grafana changes
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable and start Grafana
+      systemd:
+        name: grafana-server
+        enabled: yes
+        state: restarted
+
+  handlers:
+    - name: Restart Prometheus
+      systemd:
+        name: prometheus
+        state: restarted
+
+    - name: Restart Loki
+      systemd:
+        name: loki
+        state: restarted
+
+    - name: Restart Grafana
+      systemd:
+        name: grafana-server
+        state: restarted
