@@ -1,4 +1,3 @@
 ---
 - import_playbook: playbooks/update-packages.yml
 - import_playbook: playbooks/monitoring/install-prometheus-and-grafana.yml
-- import_playbook: playbooks/backups/setup-router-backups.yml
