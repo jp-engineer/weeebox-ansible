@@ -2,6 +2,15 @@
 - name: Install Promtail on all Raspberry Pis
   hosts: pis
   become: true
+  vars_files:
+    - ~/ansible-secrets/github_token.yml  # Load the GitHub token securely
+
+  vars:
+    promtail_bin: "/usr/local/bin/promtail"
+    promtail_dir: "/etc/promtail"
+    promtail_service_dir: "/etc/systemd/system"
+    temp_dir: "/tmp/loki-extract"
+
   tasks:
     - name: Install dependencies
       apt:
@@ -11,10 +20,12 @@
         state: present
         update_cache: yes
 
-    - name: Get the latest Promtail release version
+    - name: Get the latest Promtail release version (with authentication)
       uri:
         url: https://api.github.com/repos/grafana/loki/releases/latest
         method: GET
+        headers:
+          Authorization: "token {{ vault_github_token }}"
         return_content: yes
       register: github_release
 
@@ -22,60 +33,114 @@
       set_fact:
         promtail_version: "{{ github_release.json.tag_name | regex_replace('^v', '') }}"
 
-    - name: Determine correct architecture for Promtail
+    - name: Set Promtail architecture variable
       set_fact:
-        promtail_arch: "{% if 'pi-runt' in inventory_hostname %}armv6{% else %}armv7{% endif %}"
+        promtail_arch: "arm64"
+
+    - name: Set architecture-specific Promtail URL
+      set_fact:
+        promtail_url: "https://github.com/grafana/loki/releases/download/v{{ promtail_version }}/promtail-linux-{{ promtail_arch }}.zip"
 
     - name: Check if Promtail is already installed
-      command: "/usr/local/bin/promtail --version"
+      command: "{{ promtail_bin }} --version"
       register: installed_version_output
       ignore_errors: yes
       changed_when: false
 
-    - name: Extract installed version (if available)
+    - name: Extract installed version
       set_fact:
-        installed_version: "{{ installed_version_output.stdout_lines[0] | regex_search('promtail, version ([^ ]+)', '\\1') | first }}"
-      when: installed_version_output.stdout_lines is defined
+        installed_version: "{{ installed_version_output.stdout | regex_search('version ([^ ]+)', '\\1') | first }}"
+      when: installed_version_output.stdout is defined and installed_version_output.stdout | length > 0
       ignore_errors: yes
 
-    - name: Compare installed version with latest
+    - name: Determine if update is needed
       set_fact:
         needs_update: "{{ installed_version is not defined or installed_version != promtail_version }}"
 
-    - name: Download and install Promtail if outdated or missing
-      shell: |
-        cd /tmp
-        curl -LO https://github.com/grafana/loki/releases/download/v{{ promtail_version }}/promtail-linux-{{ promtail_arch }}.zip
-        unzip promtail-linux-{{ promtail_arch }}.zip
-        mv promtail-linux-{{ promtail_arch }} /usr/local/bin/promtail
-        chmod +x /usr/local/bin/promtail
-      args:
-        creates: /usr/local/bin/promtail
+    - name: Install Promtail if missing or outdated
       when: needs_update
+      block:
+        - name: Download Promtail binary
+          get_url:
+            url: "{{ promtail_url }}"
+            dest: "/tmp/promtail-linux-{{ promtail_arch }}.zip"
 
-    - name: Deploy `promtail-config.yml` only if different
+        - name: Create temporary extraction directory
+          file:
+            path: "{{ temp_dir }}"
+            state: directory
+
+        - name: Extract Promtail
+          unarchive:
+            src: "/tmp/promtail-linux-{{ promtail_arch }}.zip"
+            dest: "{{ temp_dir }}"
+            remote_src: yes
+
+        - name: Move Promtail binary to /usr/local/bin
+          copy:
+            src: "{{ temp_dir }}/promtail-linux-{{ promtail_arch }}"
+            dest: "{{ promtail_bin }}"
+            remote_src: yes
+            mode: "0755"
+
+        - name: Cleanup temporary files
+          file:
+            path: "{{ temp_dir }}"
+            state: absent
+
+        - name: Cleanup downloaded archive
+          file:
+            path: "/tmp/promtail-linux-{{ promtail_arch }}.zip"
+            state: absent
+
+    - name: Ensure Promtail config directory exists
+      file:
+        path: "{{ promtail_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy Promtail configuration file
       copy:
         src: files/promtail-config.yml
-        dest: /etc/promtail/promtail-config.yml
+        dest: "{{ promtail_dir }}/promtail-config.yml"
         owner: root
         group: root
-        mode: '0644'
+        mode: "0644"
       notify: Restart Promtail
 
-    - name: Deploy `promtail.service` only if different
+    - name: Deploy Promtail systemd service file
       copy:
         src: files/promtail.service
-        dest: /etc/systemd/system/promtail.service
+        dest: "{{ promtail_service_dir }}/promtail.service"
         owner: root
         group: root
-        mode: '0644'
+        mode: "0644"
       notify: Restart Promtail
 
-    - name: Enable and start Promtail
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Check if Promtail service is running
+      command: systemctl is-active promtail
+      register: promtail_running
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Check if Promtail service is enabled
+      command: systemctl is-enabled promtail
+      register: promtail_enabled
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Enable and start Promtail service only if needed
       systemd:
         name: promtail
         enabled: yes
         state: started
+      when: promtail_running.stdout != "active" or promtail_enabled.stdout != "enabled"
 
   handlers:
     - name: Restart Promtail

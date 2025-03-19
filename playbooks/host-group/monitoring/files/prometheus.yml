@@ -17,7 +17,6 @@ scrape_configs:
           - pi-k-master:9100
           - pi-k-worker-1:9100
           - pi-k-worker-2:9100
-          - pi-runt:9100
 
   - job_name: 'loki'
     static_configs:

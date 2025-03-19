@@ -14,13 +14,15 @@
       command: rfkill block wifi
       changed_when: false
 
-    - name: Ensure WiFi interface is disabled on boot
-      copy:
-        dest: /etc/modprobe.d/raspi-blacklist.conf
-        content: |
-          blacklist brcmfmac
-          blacklist brcmutil
-      mode: '0644'
+    - name: Ensure WiFi modules are blacklisted
+      lineinfile:
+        path: /etc/modprobe.d/raspi-blacklist.conf
+        line: "{{ item }}"
+        create: yes
+        state: present
+      loop:
+        - "blacklist brcmfmac"
+        - "blacklist brcmutil"
 
     - name: Apply changes (Reboot required if config.txt changed)
       reboot:

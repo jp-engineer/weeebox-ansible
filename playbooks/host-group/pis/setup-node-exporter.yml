@@ -2,6 +2,9 @@
 - name: Install Node Exporter on all Raspberry Pis
   hosts: all
   become: true
+  vars_files:
+    - ~/ansible-secrets/github_token.yml  # Load the GitHub token securely
+
   tasks:
     - name: Install dependencies
       apt:
@@ -11,10 +14,12 @@
         state: present
         update_cache: yes
 
-    - name: Get the latest Node Exporter release version
+    - name: Get the latest Node Exporter release version (with authentication)
       uri:
         url: https://api.github.com/repos/prometheus/node_exporter/releases/latest
         method: GET
+        headers:
+          Authorization: "token {{ vault_github_token }}"
         return_content: yes
       register: github_release
 
@@ -34,8 +39,8 @@
 
     - name: Extract installed version (if available)
       set_fact:
-        installed_version: "{{ installed_version_output.stdout_lines[0] | regex_search('node_exporter, version ([^ ]+)', '\\1') | first }}"
-      when: installed_version_output.stdout_lines is defined
+        installed_version: "{{ installed_version_output.stdout | regex_search('version ([^ ]+)', '\\1') | first }}"
+      when: installed_version_output.stdout is defined and installed_version_output.stdout | length > 0
       ignore_errors: yes
 
     - name: Compare installed version with latest
@@ -43,18 +48,35 @@
         needs_update: "{{ installed_version is not defined or installed_version != node_exporter_version }}"
 
     - name: Download and install Node Exporter if outdated or missing
-      shell: |
-        cd /tmp
-        curl -LO https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}.tar.gz
-        tar -xzf node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}.tar.gz
-        mv node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}/node_exporter /usr/local/bin/
-      args:
-        creates: /usr/local/bin/node_exporter
-      when: needs_update
+      block:
+        - name: Download Node Exporter binary
+          get_url:
+            url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}.tar.gz"
+            dest: "/tmp/node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}.tar.gz"
+            headers:
+              Authorization: "token {{ vault_github_token }}"
+          when: needs_update
+
+        - name: Extract Node Exporter package
+          unarchive:
+            src: "/tmp/node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}.tar.gz"
+            dest: "/tmp/"
+            remote_src: yes
+          when: needs_update
+
+        - name: Move Node Exporter binary to /usr/local/bin/
+          command: mv /tmp/node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}/node_exporter /usr/local/bin/
+          when: needs_update
+
+        - name: Make Node Exporter executable
+          file:
+            path: /usr/local/bin/node_exporter
+            mode: '0755'
+          when: needs_update
 
     - name: Deploy `node_exporter.service` only if different
       copy:
-        src: playbooks/monitoring/files/node_exporter.service
+        src: files/node_exporter.service
         dest: /etc/systemd/system/node_exporter.service
         owner: root
         group: root
