@@ -29,7 +29,7 @@
 
     - name: Determine correct architecture for Node Exporter
       set_fact:
-        node_exporter_arch: "{% if 'pi-runt' in inventory_hostname %}armv6{% else %}armv7{% endif %}"
+        node_exporter_arch: "{% if inventory_hostname == 'pi-hole' %}armv7{% else %}arm64{% endif %}"
 
     - name: Check if Node Exporter is already installed
       command: "/usr/local/bin/node_exporter --version"
