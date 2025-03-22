@@ -1,0 +1,12 @@
+[Unit]
+Description=Grafana instance
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/grafana-server -homepath /usr/local/bin
+Restart=always
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

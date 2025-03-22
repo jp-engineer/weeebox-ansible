@@ -1,9 +1,13 @@
 [Unit]
-Description=Promtail Log Forwarder
+Description=Prometheus Server
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/promtail -config.file=/etc/promtail/promtail-config.yml
+ExecStart=/usr/local/bin/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus \
+  --web.console.templates=/usr/local/bin/consoles \
+  --web.console.libraries=/usr/local/bin/console_libraries
 Restart=always
 User=root
 Group=root

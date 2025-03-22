@@ -3,11 +3,9 @@
   - import_playbook: playbooks/utilities/disable-wifi.yml
   - import_playbook: playbooks/utilities/update-packages.yml
 
-#  - import_playbook: playbooks/host-group/pis/setup-node-exporter.yml
-##### fix Determine correct architecture for Node Exporter
+  - import_playbook: playbooks/host-group/pis/setup-node-exporter.yml
 
 
-#  - import_playbook: playbooks/host-group/pis/setup-promtail.yml
 #  - import_playbook: playbooks/host-group/monitoring/setup-monitoring-stack.yml
 ##### fix a lot
 
