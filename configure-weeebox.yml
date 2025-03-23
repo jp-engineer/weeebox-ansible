@@ -1,10 +1,7 @@
 ---
   - import_playbook: playbooks/run-utilities.yml
+  - import_playbook: playbooks/setup-monitoring-stack.yml
 
-
-
-#  - import_playbook: playbooks/host-group/monitoring/setup-monitoring-stack.yml
-##### fix a lot
 
 # - import_playbook: playbooks/host-group/dns/setup-dns-sinkhole.yml
 # - import_playbook: playbooks/host-group/tor/setup-tor-wifi.yml

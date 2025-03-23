@@ -3,8 +3,7 @@
   hosts: all
   become: true
   vars_files:
-    - ~/ansible-secrets/github_token.yml  # Load the GitHub token securely
-
+    - ~/ansible-secrets/github_token.yml
   tasks:
     - name: Install dependencies
       apt:
