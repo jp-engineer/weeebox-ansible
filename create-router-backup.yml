@@ -1,6 +1,7 @@
 ---
 - name: Backup OpenWRT router config
   hosts: router
+  gather_facts: false
   become: false
   vars:
     remote_backup_path: "/tmp/openwrt-backup.tar.gz"
@@ -8,15 +9,17 @@
 
   tasks:
     - name: Generate OpenWRT backup archive on router
-      command: sysupgrade -b {{ remote_backup_path }}
+      raw: sysupgrade -b {{ remote_backup_path }}
+      changed_when: false
 
-    - name: Fetch backup archive to control node
-      fetch:
-        src: "{{ remote_backup_path }}"
-        dest: "{{ local_backup_path }}"
-        flat: yes
+    - name: Copy backup from router using scp (controller-side)
+      delegate_to: localhost
+      ansible.builtin.command: >
+        scp -i ~/.ssh/ansible -o StrictHostKeyChecking=no root@{{ inventory_hostname }}:{{ remote_backup_path }} {{ local_backup_path }}
+      register: scp_result
+      changed_when: false
+      failed_when: scp_result.rc != 0
 
     - name: Delete backup file from router
-      file:
-        path: "{{ remote_backup_path }}"
-        state: absent
+      raw: rm -f {{ remote_backup_path }}
+      changed_when: false
