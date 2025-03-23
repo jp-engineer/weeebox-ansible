@@ -1,0 +1,17 @@
+---
+- name: Copy OpenWRT backup archive to router
+  copy:
+    src: "{{ local_backup_file }}"
+    dest: "{{ restore_backup_file }}"
+    mode: '0644'
+
+- name: Restore router configuration
+  raw: sysupgrade -r {{ restore_backup_file }}
+  async: 60
+  poll: 0
+  register: restore_command
+
+- name: Wait for router to reboot
+  wait_for_connection:
+    delay: 30
+    timeout: 120

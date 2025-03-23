@@ -1,6 +1,6 @@
 ---
 - name: Install Node Exporter on all Raspberry Pis
-  hosts: all
+  hosts: pis
   become: true
   vars_files:
     - ~/ansible-secrets/github_token.yml
