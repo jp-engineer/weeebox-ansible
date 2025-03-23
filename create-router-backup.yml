@@ -1,0 +1,22 @@
+---
+- name: Backup OpenWRT router config
+  hosts: router
+  become: false
+  vars:
+    remote_backup_path: "/tmp/openwrt-backup.tar.gz"
+    local_backup_path: "playbooks/host-group/router/backups/openwrt-backup.tar.gz"
+
+  tasks:
+    - name: Generate OpenWRT backup archive on router
+      command: sysupgrade -b {{ remote_backup_path }}
+
+    - name: Fetch backup archive to control node
+      fetch:
+        src: "{{ remote_backup_path }}"
+        dest: "{{ local_backup_path }}"
+        flat: yes
+
+    - name: Delete backup file from router
+      file:
+        path: "{{ remote_backup_path }}"
+        state: absent

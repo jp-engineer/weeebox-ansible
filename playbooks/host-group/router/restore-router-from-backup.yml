@@ -1,0 +1,93 @@
+---
+- name: Restore OpenWRT router from backup (only if config differs)
+  hosts: router
+  gather_facts: false
+  become: false
+  vars:
+    local_backup_file: "playbooks/host-group/router/backups/openwrt-backup.tar.gz"
+    remote_temp_backup: "/tmp/openwrt-backup.tar.gz"
+    restore_backup_file: "/tmp/openwrt-backup.tar.gz"
+    local_temp_backup: "/tmp/router-current.tar.gz"
+
+  tasks:
+    - name: Generate current router config backup for comparison
+      raw: sysupgrade -b {{ remote_temp_backup }}
+      changed_when: false
+    
+    - name: Fetch current router backup using scp (controller-side)
+      delegate_to: localhost
+      ansible.builtin.command: >
+        scp -i ~/.ssh/ansible -o StrictHostKeyChecking=no root@{{ inventory_hostname }}:{{ remote_temp_backup }} {{ local_temp_backup }}
+      register: scp_result
+      changed_when: false
+      failed_when: scp_result.rc != 0
+
+    - name: Check if router-current.tar.gz exists on control node
+      stat:
+        path: "{{ local_temp_backup }}"
+      delegate_to: localhost
+      register: current_checksum
+
+    - name: Calculate checksum of router current backup
+      stat:
+        path: "{{ local_temp_backup }}"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      register: current_checksum_hash
+      when: current_checksum.stat.exists
+
+    - name: Calculate checksum of local backup file
+      stat:
+        path: "{{ local_backup_file }}"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      register: stored_checksum
+
+    - name: Debug checksums (optional)
+      debug:
+        msg: >
+          Router: {{ current_checksum_hash.stat.checksum | default('undefined') }} |
+          Stored: {{ stored_checksum.stat.checksum | default('undefined') }}
+
+    - name: Copy OpenWRT backup archive to router (only if different)
+      copy:
+        src: "{{ local_backup_file }}"
+        dest: "{{ restore_backup_file }}"
+        mode: '0644'
+      when:
+        - current_checksum_hash.stat.exists
+        - stored_checksum.stat.exists
+        - current_checksum_hash.stat.checksum is defined
+        - stored_checksum.stat.checksum is defined
+        - current_checksum_hash.stat.checksum != stored_checksum.stat.checksum
+
+    - name: Restore router configuration (only if different)
+      raw: sysupgrade -r {{ restore_backup_file }}
+      async: 60
+      poll: 0
+      when:
+        - current_checksum_hash.stat.exists
+        - stored_checksum.stat.exists
+        - current_checksum_hash.stat.checksum is defined
+        - stored_checksum.stat.checksum is defined
+        - current_checksum_hash.stat.checksum != stored_checksum.stat.checksum
+      register: restore_command
+
+    - name: Wait for router to reboot (only if restore happened)
+      wait_for_connection:
+        delay: 30
+        timeout: 120
+      when:
+        - current_checksum_hash.stat.exists
+        - stored_checksum.stat.exists
+        - current_checksum_hash.stat.checksum is defined
+        - stored_checksum.stat.checksum is defined
+        - current_checksum_hash.stat.checksum != stored_checksum.stat.checksum
+
+    - name: Confirm router SSH is working
+      raw: echo "✔ Router is back online and reachable via SSH"
+      changed_when: false
+
+    - name: Remove temp backup from router
+      raw: rm -f {{ remote_temp_backup }}
+      changed_when: false
