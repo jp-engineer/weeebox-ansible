@@ -1,0 +1,131 @@
+---
+- name: Install and Configure Prometheus
+  hosts: pi-monitor
+  become: true
+  vars_files:
+    - ~/ansible-secrets/github_token.yml
+
+  vars:
+    prometheus_user: prometheus
+    prometheus_version_url: https://api.github.com/repos/prometheus/prometheus/releases/latest
+    prometheus_install_dir: /usr/local/bin
+    prometheus_config_dir: /etc/prometheus
+    prometheus_data_dir: /var/lib/prometheus
+
+  tasks:
+    - name: Ensure Prometheus user exists
+      user:
+        name: "{{ prometheus_user }}"
+        shell: /usr/sbin/nologin
+        system: true
+        create_home: false
+
+    - name: Ensure Prometheus directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_user }}"
+        mode: '0755'
+      loop:
+        - "{{ prometheus_config_dir }}"
+        - "{{ prometheus_data_dir }}"
+
+    - name: Get latest Prometheus release info
+      uri:
+        url: "{{ prometheus_version_url }}"
+        method: GET
+        headers:
+          Authorization: "token {{ vault_github_token }}"
+        return_content: yes
+      register: release_info
+
+    - name: Set Prometheus version
+      set_fact:
+        prometheus_version: "{{ release_info.json.tag_name | regex_replace('^v', '') }}"
+
+    - name: Check if Prometheus is already installed
+      command: prometheus --version
+      register: prometheus_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Extract installed Prometheus version
+      set_fact:
+        installed_prometheus_version: "{{ prometheus_version_check.stdout | regex_search('version ([0-9.]+)', '\\1') }}"
+      when: prometheus_version_check.stdout is defined
+
+    - name: Download and install Prometheus if version mismatch
+      block:
+        - name: Download Prometheus tarball
+          get_url:
+            url: "https://github.com/prometheus/prometheus/releases/download/v{{ prometheus_version }}/prometheus-{{ prometheus_version }}.linux-arm64.tar.gz"
+            dest: "/tmp/prometheus.tar.gz"
+            headers:
+              Authorization: "token {{ vault_github_token }}"
+          when: prometheus_version != installed_prometheus_version
+
+        - name: Extract Prometheus tarball
+          unarchive:
+            src: /tmp/prometheus.tar.gz
+            dest: /tmp
+            remote_src: yes
+            extra_opts: [--strip-components=1]
+          when: prometheus_version != installed_prometheus_version
+
+        - name: Move Prometheus binaries to /usr/local/bin
+          command: mv /tmp/{{ item }} {{ prometheus_install_dir }}/{{ item }}
+          args:
+            creates: "{{ prometheus_install_dir }}/{{ item }}"
+          loop:
+            - prometheus
+            - promtool
+          when: prometheus_version != installed_prometheus_version
+
+        - name: Ensure Prometheus binaries are executable
+          file:
+            path: "{{ prometheus_install_dir }}/{{ item }}"
+            mode: '0755'
+          loop:
+            - prometheus
+            - promtool
+            
+    - name: Ensure static host entries for Prometheus targets in /etc/hosts
+      blockinfile:
+        path: /etc/hosts
+        block: "{{ lookup('file', 'files/static-hosts') }}"
+        marker: "# {mark} WEEBOX STATIC HOSTS"
+        create: yes
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Deploy Prometheus config
+      copy:
+        src: files/prometheus-prometheus.yml
+        dest: "{{ prometheus_config_dir }}/prometheus.yml"
+        owner: "{{ prometheus_user }}"
+        group: "{{ prometheus_user }}"
+        mode: '0644'
+      notify: Restart Prometheus
+
+    - name: Deploy systemd unit for Prometheus
+      copy:
+        src: files/prometheus.service
+        dest: /etc/systemd/system/prometheus.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Restart Prometheus
+
+    - name: Enable and start Prometheus
+      systemd:
+        name: prometheus
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Restart Prometheus
+      systemd:
+        name: prometheus
+        state: restarted

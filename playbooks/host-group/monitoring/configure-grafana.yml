@@ -1,0 +1,95 @@
+---
+- name: Install and Configure Grafana
+  hosts: pi-monitor
+  become: true
+  vars_files:
+    - ~/ansible-secrets/github_token.yml
+    - ~/ansible-secrets/grafana_password.yml
+
+  tasks:
+    - name: Get latest Grafana release info
+      uri:
+        url: https://api.github.com/repos/grafana/grafana/releases/latest
+        method: GET
+        headers:
+          Authorization: "token {{ vault_github_token }}"
+        return_content: yes
+      register: grafana_release_info
+
+    - name: Set Grafana version
+      set_fact:
+        grafana_version: "{{ grafana_release_info.json.tag_name | regex_replace('^v', '') }}"
+
+    - name: Check if Grafana is installed
+      command: grafana-server -v
+      register: grafana_version_check
+      failed_when: false
+      changed_when: false
+
+    - name: Extract installed Grafana version
+      set_fact:
+        installed_grafana_version: "{{ grafana_version_check.stdout | regex_search('v([0-9.]+)', '\\1') }}"
+      when: grafana_version_check.stdout is defined
+
+    - name: Download and install Grafana if version mismatch
+      apt:
+        deb: "https://dl.grafana.com/oss/release/grafana_{{ grafana_version }}_arm64.deb"
+      when: grafana_version != installed_grafana_version
+
+    - name: Create systemd override directory for Grafana
+      file:
+        path: /etc/systemd/system/grafana-server.service.d
+        state: directory
+        mode: '0755'
+
+    - name: Configure admin password via environment variable
+      copy:
+        dest: /etc/systemd/system/grafana-server.service.d/override.conf
+        content: |
+          [Service]
+          Environment="GF_SECURITY_ADMIN_PASSWORD={{ grafana_admin_password }}"
+        owner: root
+        group: root
+        mode: '0644'
+      notify: Reload Grafana
+
+    - name: Enable and start Grafana
+      systemd:
+        name: grafana-server
+        enabled: true
+        state: started
+
+    - name: Check if Grafana database exists
+      stat:
+        path: /var/lib/grafana/grafana.db
+      register: grafana_db
+
+    - name: Check if admin password is already correct
+      uri:
+        url: http://localhost:3000/api/user
+        method: GET
+        user: admin
+        password: "{{ grafana_admin_password }}"
+        force_basic_auth: true
+        status_code: 200
+      register: grafana_auth_check
+      failed_when: false
+      changed_when: false
+      when: grafana_db.stat.exists
+
+    - name: Reset Grafana admin password using grafana-cli
+      command: grafana-cli admin reset-admin-password "{{ grafana_admin_password }}"
+      when: grafana_db.stat.exists and grafana_auth_check.status != 200
+      notify: Restart Grafana
+
+  handlers:
+    - name: Reload Grafana
+      systemd:
+        name: grafana-server
+        daemon_reload: true
+        state: restarted
+
+    - name: Restart Grafana
+      systemd:
+        name: grafana-server
+        state: restarted

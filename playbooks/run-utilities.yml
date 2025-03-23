@@ -1,0 +1,4 @@
+---
+  - import_playbook: utilities/set-ansible-sudo-pwordless.yml
+  - import_playbook: utilities/disable-wifi.yml
+  - import_playbook: utilities/update-packages.yml

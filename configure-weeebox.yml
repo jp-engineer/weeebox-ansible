@@ -1,9 +1,6 @@
 ---
-  - import_playbook: playbooks/utilities/set-ansible-sudo-pwordless.yml
-  - import_playbook: playbooks/utilities/disable-wifi.yml
-  - import_playbook: playbooks/utilities/update-packages.yml
+  - import_playbook: playbooks/run-utilities.yml
 
-  - import_playbook: playbooks/host-group/pis/setup-node-exporter.yml
 
 
 #  - import_playbook: playbooks/host-group/monitoring/setup-monitoring-stack.yml

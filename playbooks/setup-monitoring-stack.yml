@@ -1,0 +1,7 @@
+---
+  - import_playbook: host-group/pis/setup-node-exporter.yml
+
+  - import_playbook: host-group/monitoring/configure-prometheus.yml
+  - import_playbook: host-group/monitoring/configure-grafana.yml
+  - import_playbook: host-group/monitoring/setup-dashboard.yml
+  

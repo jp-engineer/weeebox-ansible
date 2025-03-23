@@ -1,0 +1,44 @@
+---
+- name: Provision Grafana Dashboards and Data Sources
+  hosts: pi-monitor
+  become: true
+  tasks:
+    - name: Ensure dashboards folder exists
+      file:
+        path: /var/lib/grafana/dashboards
+        state: directory
+        owner: grafana
+        group: grafana
+        mode: '0755'
+
+    - name: Copy Node Exporter dashboard JSON
+      copy:
+        src: files/1860.json
+        dest: /var/lib/grafana/dashboards/node_exporter.json
+        owner: grafana
+        group: grafana
+        mode: '0644'
+
+    - name: Deploy dashboards provisioning config
+      copy:
+        src: files/dashboards.yml
+        dest: /etc/grafana/provisioning/dashboards/dashboards.yml
+        owner: grafana
+        group: grafana
+        mode: '0644'
+      notify: Restart Grafana
+
+    - name: Deploy data sources provisioning config
+      copy:
+        src: files/prometheus-datasources.yml
+        dest: /etc/grafana/provisioning/datasources/prometheus.yml
+        owner: grafana
+        group: grafana
+        mode: '0644'
+      notify: Restart Grafana
+
+  handlers:
+    - name: Restart Grafana
+      systemd:
+        name: grafana-server
+        state: restarted
