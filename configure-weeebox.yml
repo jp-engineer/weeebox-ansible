@@ -1,4 +1,6 @@
 ---
+  - import_playbook: playbooks/host-group/router/restore-router-from-backup.yml
+
   - import_playbook: playbooks/run-utilities.yml
   - import_playbook: playbooks/setup-monitoring-stack.yml
 
