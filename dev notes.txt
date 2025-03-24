@@ -1,0 +1,8 @@
+set prometheus and grafana versions as variables
+
+store all data on the nas
+
+leave kuberenetes machines bare bones - dont run install prometheus script
+
+look into backblaze online backups - only backup that which is irreplacable
+- decide on encryption before storing online
