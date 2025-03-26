@@ -3,7 +3,7 @@
   hosts: pis:!pi-tor
   become: true
   tasks:
-    - name: Ensure WiFi is disabled in /boot/config.txt
+    - name: Ensure WiFi is disabled in /boot/firmware/config.txt
       lineinfile:
         path: /boot/firmware/config.txt
         line: "dtoverlay=disable-wifi"
