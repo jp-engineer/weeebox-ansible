@@ -1,0 +1,53 @@
+---
+- name: Set up virtual NAS drive on pi-nas
+  hosts: pi-nas
+  become: true
+  vars:
+    lvm_physical_disks:
+      - /dev/sda
+      - /dev/sdb
+      - /dev/sdc
+    volume_group: weeebox_vg
+    logical_volume: nas_storage
+    mount_point: /mnt/nas
+    filesystem_type: ext4
+    lv_path: "/dev/{{ volume_group }}/{{ logical_volume }}"
+
+  tasks:
+
+    - name: Ensure lvm2 is installed
+      apt:
+        name: lvm2
+        state: present
+        update_cache: true
+
+    - name: Ensure volume group and physical volumes exist
+      community.general.lvg:
+        vg: "{{ volume_group }}"
+        pvs: "{{ lvm_physical_disks }}"
+        state: present
+
+    - name: Ensure logical volume exists
+      community.general.lvol:
+        vg: "{{ volume_group }}"
+        lv: "{{ logical_volume }}"
+        state: present
+
+    - name: Format logical volume if not already formatted
+      filesystem:
+        fstype: "{{ filesystem_type }}"
+        dev: "{{ lv_path }}"
+
+    - name: Ensure mount point exists
+      file:
+        path: "{{ mount_point }}"
+        state: directory
+        mode: '0755'
+
+    - name: Ensure mount is present and mounted
+      mount:
+        path: "{{ mount_point }}"
+        src: "{{ lv_path }}"
+        fstype: "{{ filesystem_type }}"
+        opts: defaults
+        state: mounted
