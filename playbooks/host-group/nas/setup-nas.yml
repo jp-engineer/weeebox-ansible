@@ -1,0 +1,91 @@
+
+---
+- name: Set up virtual NAS drive on pi-nas
+  hosts: pi-nas
+  become: true
+  vars:
+    lvm_physical_disks:
+      - /dev/sda
+      - /dev/sdb
+      - /dev/sdc
+    volume_group: weeebox_vg
+    logical_volume: nas_storage
+    mount_point: /mnt/nas
+    filesystem_type: ext4
+    lv_path: "/dev/{{ volume_group }}/{{ logical_volume }}"
+
+  tasks:
+
+    - name: Ensure lvm2 is installed
+      apt:
+        name: lvm2
+        state: present
+        update_cache: true
+
+    - name: Check if each physical volume is initialized
+      shell: pvs --noheadings -o pv_name
+      register: pvs_output
+      changed_when: false
+
+    - name: Initialize missing physical volumes
+      command: pvcreate {{ item }}
+      when: item not in pvs_output.stdout
+      loop: "{{ lvm_physical_disks }}"
+
+    - name: Check if volume group exists
+      shell: vgdisplay {{ volume_group }}
+      register: vg_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create volume group if it doesn't exist
+      command: vgcreate {{ volume_group }} {{ lvm_physical_disks | join(' ') }}
+      when: vg_check.rc != 0
+
+    - name: Check if logical volume exists
+      shell: lvdisplay {{ lv_path }}
+      register: lv_check
+      failed_when: false
+      changed_when: false
+
+    - name: Create logical volume if missing
+      command: lvcreate -l 100%FREE -n {{ logical_volume }} {{ volume_group }}
+      when: lv_check.rc != 0
+
+    - name: Check if logical volume is formatted
+      shell: blkid -o value -s TYPE {{ lv_path }}
+      register: fs_check
+      failed_when: false
+      changed_when: false
+
+    - name: Format logical volume if not already formatted
+      filesystem:
+        fstype: "{{ filesystem_type }}"
+        dev: "{{ lv_path }}"
+      when: fs_check.stdout != filesystem_type
+
+    - name: Ensure mount point exists
+      file:
+        path: "{{ mount_point }}"
+        state: directory
+        mode: '0755'
+
+    - name: Mount the logical volume
+      mount:
+        path: "{{ mount_point }}"
+        src: "{{ lv_path }}"
+        fstype: "{{ filesystem_type }}"
+        state: mounted
+
+    - name: Get UUID of logical volume
+      command: blkid -s UUID -o value {{ lv_path }}
+      register: uuid_output
+      changed_when: false
+
+    - name: Add mount to fstab using UUID
+      mount:
+        path: "{{ mount_point }}"
+        src: "UUID={{ uuid_output.stdout }}"
+        fstype: "{{ filesystem_type }}"
+        opts: defaults
+        state: present
