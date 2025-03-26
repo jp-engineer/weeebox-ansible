@@ -1,0 +1,4 @@
+---
+  # - import_playbook: host-group/monitoring/setup-local-vpn.yml
+  # - import_playbook: host-group/dns/setup-pi-hole.yml
+  - import_playbook: host-group/tor/setup-tor.yml

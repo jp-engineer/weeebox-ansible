@@ -1,0 +1,57 @@
+---
+- name: Set up Tor transparent proxy on pi-tor
+  hosts: pi-tor
+  become: true
+  vars:
+    tor_config_file: /etc/tor/torrc
+
+  tasks:
+    - name: Ensure apt sources use HTTPS instead of HTTP
+      block:
+        - name: Fix /etc/apt/sources.list
+          replace:
+            path: /etc/apt/sources.list
+            regexp: 'http://(deb|archive)\\.debian\\.org'
+            replace: 'https://\1.debian.org'
+          ignore_errors: true
+
+        - name: Fix /etc/apt/sources.list.d/raspi.list (if exists)
+          replace:
+            path: /etc/apt/sources.list.d/raspi.list
+            regexp: 'http://(deb|archive)\\.raspberrypi\\.com'
+            replace: 'https://\1.raspberrypi.com'
+          ignore_errors: true
+
+        - name: Clean apt cache and fix broken lists
+          block:
+            - name: Clean apt cache
+              command: apt-get clean
+              ignore_errors: true
+
+            - name: Remove existing apt list files
+              file:
+                path: /var/lib/apt/lists/
+                state: absent
+
+            - name: Recreate apt lists directory
+              file:
+                path: /var/lib/apt/lists/
+                state: directory
+
+            - name: Reinstall keyrings (optional, may fail silently)
+              apt:
+                name:
+                  - debian-archive-keyring
+                  - raspberrypi-archive-keyring
+                state: present
+              ignore_errors: true
+
+        - name: Update apt cache (after HTTPS fix)
+          apt:
+            update_cache: true
+            cache_valid_time: 3600
+
+    - name: Install Tor
+      apt:
+        name: tor
+        state: present
